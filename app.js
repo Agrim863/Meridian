@@ -1,5 +1,4 @@
-import maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import maplibregl from 'https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/+esm';
 
 /** Real-world vector basemap (OpenStreetMap via OpenFreeMap) — works with MapLibre globe */
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/dark';
