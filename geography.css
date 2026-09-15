@@ -1,0 +1,406 @@
+.map-engine {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.map-engine .maplibregl-map,
+.map-engine .maplibregl-canvas-container,
+.map-engine canvas.maplibregl-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.map-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: radial-gradient(circle at center, transparent 48%, rgba(6, 19, 29, 0.28) 100%);
+  pointer-events: none;
+}
+
+/* MapLibre container stays alive in both 2D and 3D (globe projection) */
+#map2d {
+  display: block !important;
+  background: #06131d;
+}
+
+.welcome {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 370px;
+  padding: 27px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.welcome h1 {
+  font-size: 29px;
+  line-height: 1.12;
+  margin: 15px 0;
+}
+
+.welcome p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #a9c0c8;
+}
+
+.welcome .eyebrow { justify-content: center; }
+.welcome .eyebrow span { color: #70dfbe; }
+
+.welcome-action {
+  margin-top: 12px;
+  width: 100%;
+  border: 0;
+  background: #65d9dd;
+  color: #06131d;
+  padding: 12px;
+  border-radius: 4px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.welcome-action b {
+  float: right;
+  font-size: 18px;
+}
+
+#planner input {
+  width: 100%;
+  margin-top: 9px;
+  padding: 11px;
+  background: #0c2432;
+  border: 1px solid #31434b;
+  color: #e7f8f8;
+  border-radius: 4px;
+  font: 12px Manrope, sans-serif;
+  outline: 0;
+}
+
+#planner input:focus {
+  border-color: #65d9dd;
+}
+
+.search-results {
+  margin-top: 5px;
+  max-height: 176px;
+  overflow: auto;
+}
+
+.search-results button {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 9px;
+  border: 0;
+  border-bottom: 1px solid #254958;
+  background: transparent;
+  color: #e5f4f5;
+  font: 11px Manrope, sans-serif;
+  cursor: pointer;
+}
+
+.search-results button:hover {
+  background: #164251;
+}
+
+.search-results small,
+.selected-port small,
+.cargo-options small {
+  font: 9px "DM Mono", monospace;
+  color: #8ba7b0;
+}
+
+.selected-port {
+  display: grid;
+  gap: 3px;
+  margin-top: 9px;
+  padding: 10px;
+  background: #0f2c38;
+  border: 1px solid rgba(101, 217, 221, 0.45);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+/* 3D bulk-carrier class models. The model itself is transparent and sits directly
+   on the map; there are intentionally no card backgrounds or flat silhouettes. */
+.ships {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.ship-marker-3d {
+  /* This is the exact element MapLibre positions with an inline `transform`
+     on every pan/zoom. Nothing here may set/animate `transform` (CSS
+     animations and transitions on this property would permanently win over
+     MapLibre's inline positioning) — the entrance animation and hover lift
+     live on .ship-marker-inner below instead. */
+  position: relative;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #dffcff;
+  cursor: pointer;
+  pointer-events: auto;
+  overflow: visible;
+  appearance: none;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.42));
+  transition: filter 0.25s;
+}
+
+.ship-marker-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  height: 100%;
+  animation: ship-marker-emerge 0.55s ease-out both;
+  transition: transform 0.25s;
+}
+
+.ship-marker-3d model-viewer {
+  display: block;
+  background: transparent;
+  --poster-color: transparent;
+  transform: scale(var(--ship-visual-scale, 1));
+  transform-origin: center center;
+  overflow: visible;
+}
+
+
+.ship-marker-3d.compatible model-viewer {
+  filter: saturate(1.35) hue-rotate(145deg) brightness(1.03);
+}
+
+.ship-marker-3d.disabled model-viewer {
+  filter: grayscale(1) brightness(0.58);
+}
+
+.ship-marker-3d.compatible:hover {
+  filter: drop-shadow(0 4px 10px rgba(101, 217, 221, 0.48));
+}
+
+.ship-marker-3d.compatible:hover .ship-marker-inner {
+  transform: translateY(-2px) scale(1.03);
+}
+
+.ship-marker-3d.selected {
+  filter: drop-shadow(0 0 16px rgba(101, 217, 221, 0.9)) drop-shadow(0 10px 20px rgba(0, 0, 0, 0.45));
+}
+
+.ship-marker-3d.selected model-viewer {
+  filter: brightness(1.2) saturate(1.15);
+}
+
+.ship-marker-3d.disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+  filter: grayscale(1) brightness(0.62) drop-shadow(0 5px 10px rgba(0, 0, 0, 0.35));
+}
+
+.ship-marker-3d.disabled:hover {
+  opacity: 0.72;
+}
+
+.ship-marker-3d.disabled:hover .ship-marker-inner {
+  transform: translateY(-2px);
+}
+
+.ship-model-label {
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  transform: translate(-50%, 100%);
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 11px;
+  border: 1px solid rgba(101, 217, 221, 0.25);
+  border-radius: 4px;
+  background: rgba(6, 19, 29, 0.9);
+  color: #dffcff;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  z-index: 20;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+.ship-model-label b {
+  display: block;
+  font: 700 13px "DM Mono", monospace;
+}
+
+.ship-model-label small {
+  display: block;
+  margin-top: 3px;
+  color: #91adb5;
+  font: 11px "DM Mono", monospace;
+  white-space: normal;
+}
+
+.ship-marker-3d:hover .ship-model-label,
+.ship-marker-3d.selected .ship-model-label {
+  opacity: 1;
+}
+
+.ship-marker-3d.disabled .ship-model-label {
+  color: #aab2b5;
+  border-color: rgba(160, 160, 160, 0.25);
+}
+
+@keyframes ship-marker-emerge {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.geo-marker {
+  border: 0;
+  background: transparent;
+  color: white;
+  cursor: default;
+  text-shadow: 0 1px 5px #00121c;
+  font: 600 11px Manrope, sans-serif;
+  text-align: center;
+  padding: 0;
+}
+
+.geo-marker .marker-core,
+.geo-marker span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: 0 auto 4px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: #65d9dd;
+  position: relative;
+}
+
+.geo-marker.origin .marker-core,
+.geo-marker.origin span {
+  background: #65d9dd;
+  box-shadow: 0 0 0 5px rgba(101, 217, 221, 0.28);
+}
+
+.geo-marker.destination .marker-core,
+.geo-marker.destination span {
+  background: #f4c542;
+  box-shadow: 0 0 0 5px rgba(244, 197, 66, 0.28);
+}
+
+.geo-marker.pulse-in .marker-core::after,
+.geo-marker.pulse-in span::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: inherit;
+  animation: port-pulse 2.2s ease-out infinite;
+}
+
+.geo-marker.origin .marker-core::after { color: #65d9dd; }
+.geo-marker.destination .marker-core::after { color: #f4c542; }
+
+.geo-marker b {
+  display: block;
+  white-space: nowrap;
+}
+
+.geo-marker small {
+  display: block;
+  font: 8px "DM Mono", monospace;
+  color: #b7e9eb;
+  letter-spacing: 0.06em;
+}
+
+@keyframes port-pulse {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.geo-marker.pulse-in .marker-core {
+  animation: marker-appear 0.9s ease-out both;
+}
+
+@keyframes marker-appear {
+  from {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.maplibregl-ctrl-group {
+  background: rgba(8, 38, 56, 0.92) !important;
+  border: 1px solid rgba(156, 206, 218, 0.2) !important;
+}
+
+.maplibregl-ctrl-group button {
+  background-color: transparent !important;
+}
+
+@media (max-width: 700px) {
+  .welcome { width: 290px; }
+  .search-panel { max-height: 65vh; overflow: auto; }
+  .geo-marker b { font-size: 9px; }
+}
+
+
+/* Readability pass for map-side dashboard controls and vessel labels. */
+.welcome h1 { font-family: Arial, Helvetica, sans-serif; font-size: 32px; font-weight: 800; }
+.welcome p { font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.55; }
+.welcome-action { font-family: Arial, Helvetica, sans-serif; font-size: 14px; padding: 13px; }
+#planner input { font-family: Arial, Helvetica, sans-serif; font-size: 14px; padding: 12px; }
+.search-results button { font-family: Arial, Helvetica, sans-serif; font-size: 14px; padding: 11px; }
+.search-results small, .selected-port small, .cargo-options small { font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+.selected-port { font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
+.ship-model-label b { font-family: Arial, Helvetica, sans-serif; font-size: 15px; }
+.ship-model-label small { font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
+.geo-marker { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; }
+.geo-marker small { font-family: Arial, Helvetica, sans-serif; font-size: 10px; }
+.geo-marker .marker-core, .geo-marker span { width: 13px; height: 13px; }
+
+/* Recommendation states: the action remains the visual focal point. */
+.recommendation.rec-lock { border-left-color: #f4c542; background: linear-gradient(90deg, rgba(244,197,66,.16), rgba(9,32,46,.72)); }
+.recommendation.rec-lock .recommendation-badge, .recommendation.rec-lock .recommendation-main b { color: #f8d866; }
+.recommendation.rec-wait { border-left-color: #67dfba; background: linear-gradient(90deg, rgba(103,223,186,.13), rgba(9,32,46,.72)); }
+.recommendation.rec-wait .recommendation-badge, .recommendation.rec-wait .recommendation-main b { color: #78e6c2; }
+.recommendation.rec-monitor { border-left-color: #65d9dd; background: linear-gradient(90deg, rgba(101,217,221,.12), rgba(9,32,46,.72)); }
+.recommendation.rec-monitor .recommendation-badge, .recommendation.rec-monitor .recommendation-main b { color: #7ce4e7; }
+
+@media (max-width: 850px) {
+  .intelligence { font-size: 14px; }
+  .intelligence.expanded { bottom: 188px; }
+  .freight-chart { height: 165px; }
+}

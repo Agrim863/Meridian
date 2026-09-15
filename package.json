@@ -1,0 +1,25 @@
+{
+  "name": "maritime-voyage",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "routes": "node scripts/generate-routes.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@arcnautical/maritime-routing": "^1.0.0",
+    "maplibre-gl": "^5.6.0",
+    "searoute-ts": "^2.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^8.2.2"
+  }
+}

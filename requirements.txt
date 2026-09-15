@@ -1,0 +1,7 @@
+flask>=3.0
+flask-cors>=4.0
+numpy>=1.26
+pandas>=2.1
+scikit-learn>=1.4
+xgboost>=2.0
+gunicorn>=22.0
