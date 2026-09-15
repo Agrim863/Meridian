@@ -5,7 +5,7 @@ from functools import lru_cache
 
 import numpy as np
 import pandas as pd
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -13,11 +13,39 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBRegressor
 
+
+# ============================================================
+# PATHS / CONFIG
+# ============================================================
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(BASE_DIR)
+
 DATA_PATH = os.path.join(BASE_DIR, "freight_dataset.csv")
+
 SEASONAL_WEIGHT = 0.10
 
-# Frontend-friendly aliases -> dataset names
+
+# ============================================================
+# FRONTEND / FLASK APP
+# ============================================================
+
+# Serve the existing frontend directly from the project root.
+# This allows Render to host both the website and API from
+# the same public URL.
+app = Flask(
+    __name__,
+    static_folder=PROJECT_DIR,
+    static_url_path=""
+)
+
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+
+# ============================================================
+# FRONTEND-FRIENDLY ALIASES
+# ============================================================
+
 PORT_ALIASES = {
     "Port Hedland": "Hedland",
     "Hedland": "Hedland",
@@ -29,91 +57,157 @@ PORT_ALIASES = {
     "Gladstone": "Gladstone",
 }
 
+
 CARGO_ALIASES = {
     "Fertilizer": "Fertilizer",
     "Fertiliser": "Fertilizer",
     "fertilizer": "Fertilizer",
     "fertiliser": "Fertilizer",
+
     "Manganese": "Manganese Ore",
     "Manganese Ore": "Manganese Ore",
     "manganeseOre": "Manganese Ore",
     "manganese_ore": "Manganese Ore",
+
     "Iron Ore": "Iron Ore",
     "ironOre": "Iron Ore",
     "iron_ore": "Iron Ore",
+
     "Coal": "Coal",
     "coal": "Coal",
+
     "Thermal Coal": "Coal",
     "thermalCoal": "Coal",
     "thermal_coal": "Coal",
+
     "Coking Coal": "Coal",
     "cokingCoal": "Coal",
     "coking_coal": "Coal",
 }
 
-SUPPORTED_FREIGHT_ORIGINS = {"Beira", "Gladstone", "Hedland", "Maputo", "Nacala"}
-SUPPORTED_FREIGHT_DESTINATIONS = {"Paradip", "Visakhapatnam"}
+
+SUPPORTED_FREIGHT_ORIGINS = {
+    "Beira",
+    "Gladstone",
+    "Hedland",
+    "Maputo",
+    "Nacala",
+}
+
+SUPPORTED_FREIGHT_DESTINATIONS = {
+    "Paradip",
+    "Visakhapatnam",
+}
+
 
 VESSEL_ALIASES = {
     "Handy": "Handysize",
     "Handysize": "Handysize",
     "handysize": "Handysize",
+
     "Supramax": "Supramax",
     "supramax": "Supramax",
+
     "Ultramax": "Supramax",
     "ultramax": "Supramax",
+
     "Panamax": "Panamax",
     "panamax": "Panamax",
+
     "Kamsarmax": "Panamax",
     "kamsarmax": "Panamax",
+
     "Capesize": "Capesize",
     "capesize": "Capesize",
 }
 
 
+# ============================================================
+# ALIAS RESOLUTION
+# ============================================================
+
 def resolve_alias(mapping: dict, value) -> str | None:
     """Resolve frontend IDs/display labels case-insensitively."""
+
     raw = str(value or "").strip()
+
     if raw in mapping:
         return mapping[raw]
+
     folded = raw.casefold()
+
     for key, resolved in mapping.items():
         if str(key).casefold() == folded:
             return resolved
+
     return None
 
 
+# ============================================================
+# DATA LOADING
+# ============================================================
 
 def load_dataset() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH, parse_dates=["date"])
+    df = pd.read_csv(
+        DATA_PATH,
+        parse_dates=["date"]
+    )
+
     df = df.sort_values("date").reset_index(drop=True)
+
     return df
 
+
+# ============================================================
+# FEATURE ENGINEERING
+# ============================================================
 
 def add_model_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # Same economic baseline used by the final working model.
+    #
+    # Economic baseline =
+    # fuel cost + vessel operating cost
     df["economic_baseline_usd_t"] = (
-        df["fuel_cost_usd_t_proxy"] + df["vessel_opex_usd_t_proxy"]
+        df["fuel_cost_usd_t_proxy"]
+        + df["vessel_opex_usd_t_proxy"]
     )
 
+    # Map each cargo type to its relevant commodity price.
     commodity_map = {
         "Coal": "coal_price_usd_t",
         "Iron Ore": "iron_ore_price_usd_t",
         "Fertilizer": "fertilizer_index",
         "Manganese Ore": "manganese_price_cny_mtu",
     }
+
     df["relevant_commodity_price"] = np.nan
+
     for cargo, column in commodity_map.items():
         mask = df["cargo"].eq(cargo)
-        df.loc[mask, "relevant_commodity_price"] = df.loc[mask, column]
+        df.loc[mask, "relevant_commodity_price"] = df.loc[
+            mask,
+            column
+        ]
 
+    # Cyclical month representation.
     month = df["date"].dt.month
-    df["month_sin"] = np.sin(2 * np.pi * month / 12)
-    df["month_cos"] = np.cos(2 * np.pi * month / 12)
+
+    df["month_sin"] = np.sin(
+        2 * np.pi * month / 12
+    )
+
+    df["month_cos"] = np.cos(
+        2 * np.pi * month / 12
+    )
+
     return df
 
+
+# ============================================================
+# MODEL FEATURES
+# ============================================================
 
 NUMERIC_FEATURES = [
     "economic_baseline_usd_t",
@@ -128,6 +222,7 @@ NUMERIC_FEATURES = [
     "month_cos",
 ]
 
+
 CATEGORICAL_FEATURES = [
     "origin_port",
     "destination_port",
@@ -135,31 +230,60 @@ CATEGORICAL_FEATURES = [
     "vessel_type",
 ]
 
-MODEL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
+MODEL_FEATURES = (
+    NUMERIC_FEATURES
+    + CATEGORICAL_FEATURES
+)
+
+
+# ============================================================
+# MODEL
+# ============================================================
 
 def build_model() -> Pipeline:
+
     numeric_pipeline = Pipeline(
         steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
+            (
+                "imputer",
+                SimpleImputer(strategy="median")
+            ),
+            (
+                "scaler",
+                StandardScaler()
+            ),
         ]
     )
 
     categorical_pipeline = Pipeline(
         steps=[
-            ("imputer", SimpleImputer(strategy="most_frequent")),
+            (
+                "imputer",
+                SimpleImputer(strategy="most_frequent")
+            ),
             (
                 "onehot",
-                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=False
+                ),
             ),
         ]
     )
 
     preprocessor = ColumnTransformer(
         transformers=[
-            ("num", numeric_pipeline, NUMERIC_FEATURES),
-            ("cat", categorical_pipeline, CATEGORICAL_FEATURES),
+            (
+                "num",
+                numeric_pipeline,
+                NUMERIC_FEATURES
+            ),
+            (
+                "cat",
+                categorical_pipeline,
+                CATEGORICAL_FEATURES
+            ),
         ]
     )
 
@@ -177,11 +301,21 @@ def build_model() -> Pipeline:
 
     return Pipeline(
         steps=[
-            ("preprocessor", preprocessor),
-            ("model", regressor),
+            (
+                "preprocessor",
+                preprocessor
+            ),
+            (
+                "model",
+                regressor
+            ),
         ]
     )
 
+
+# ============================================================
+# SEASONAL PROJECTION
+# ============================================================
 
 def calculate_seasonal_change(
     history: pd.DataFrame,
@@ -192,48 +326,90 @@ def calculate_seasonal_change(
     current_date: pd.Timestamp,
     horizon: int,
 ) -> tuple[float, str]:
-    """Historical month-to-future-month $/t change with the final model's fallback hierarchy."""
+
+    """
+    Historical month-to-future-month $/t change.
+
+    Uses the final model's fallback hierarchy:
+
+    1. route + cargo + vessel
+    2. cargo
+    3. vessel
+    4. global
+    """
 
     hist = history[
         (history["date"] < current_date)
-        & (history["target_status"] == "EXISTING_OBSERVATION")
+        & (
+            history["target_status"]
+            == "EXISTING_OBSERVATION"
+        )
     ].copy()
 
     if hist.empty:
         return 0.0, "none"
 
-    # Add calendar month fields for seasonal matching.
+    # Calendar month fields.
     hist["month_num"] = hist["date"].dt.month
+
     current_month = current_date.month
-    future_month = (current_month - 1 + horizon) % 12 + 1
+
+    future_month = (
+        (current_month - 1 + horizon) % 12
+    ) + 1
 
     levels = [
         (
-            ["origin_port", "destination_port", "cargo", "vessel_type"],
+            [
+                "origin_port",
+                "destination_port",
+                "cargo",
+                "vessel_type",
+            ],
             "route+cargo+vessel",
         ),
-        (["cargo"], "cargo"),
-        (["vessel_type"], "vessel"),
-        ([], "global"),
+        (
+            ["cargo"],
+            "cargo",
+        ),
+        (
+            ["vessel_type"],
+            "vessel",
+        ),
+        (
+            [],
+            "global",
+        ),
     ]
 
     for keys, source_name in levels:
+
         subset = hist
+
         if keys:
+
             values = {
                 "origin_port": origin_port,
                 "destination_port": destination_port,
                 "cargo": cargo,
                 "vessel_type": vessel_type,
             }
-            for key in keys:
-                subset = subset[subset[key] == values[key]]
 
-        # Pair observations from the same historical year so the change is
-        # genuinely current-month -> future-month seasonal movement.
+            for key in keys:
+                subset = subset[
+                    subset[key] == values[key]
+                ]
+
         if subset.empty:
             continue
 
+        # Pair observations from the same historical year.
+        #
+        # This gives genuine:
+        #
+        # current month -> future month
+        #
+        # seasonal movement.
         pivot = subset.pivot_table(
             index=subset["date"].dt.year,
             columns="month_num",
@@ -241,129 +417,339 @@ def calculate_seasonal_change(
             aggfunc="mean",
         )
 
-        if current_month not in pivot.columns or future_month not in pivot.columns:
+        if (
+            current_month not in pivot.columns
+            or future_month not in pivot.columns
+        ):
             continue
 
-        changes = pivot[future_month] - pivot[current_month]
+        changes = (
+            pivot[future_month]
+            - pivot[current_month]
+        )
+
         changes = changes.dropna()
+
         if len(changes) > 0:
-            return float(changes.mean()), source_name
+
+            return (
+                float(changes.mean()),
+                source_name,
+            )
 
     return 0.0, "none"
 
 
-def normalize_inputs(data: dict) -> tuple[str, str, str, str]:
-    origin = resolve_alias(PORT_ALIASES, data.get("origin_port"))
-    destination = resolve_alias(PORT_ALIASES, data.get("destination_port"))
-    cargo = resolve_alias(CARGO_ALIASES, data.get("cargo"))
-    vessel = resolve_alias(VESSEL_ALIASES, data.get("vessel_type"))
+# ============================================================
+# INPUT NORMALIZATION
+# ============================================================
+
+def normalize_inputs(
+    data: dict,
+) -> tuple[str, str, str, str]:
+
+    origin = resolve_alias(
+        PORT_ALIASES,
+        data.get("origin_port")
+    )
+
+    destination = resolve_alias(
+        PORT_ALIASES,
+        data.get("destination_port")
+    )
+
+    cargo = resolve_alias(
+        CARGO_ALIASES,
+        data.get("cargo")
+    )
+
+    vessel = resolve_alias(
+        VESSEL_ALIASES,
+        data.get("vessel_type")
+    )
 
     missing = []
+
     if not origin:
         missing.append("origin_port")
+
     if not destination:
         missing.append("destination_port")
+
     if not cargo:
         missing.append("cargo")
+
     if not vessel:
         missing.append("vessel_type")
+
     if missing:
+
         raise ValueError(
             f"Invalid input for: {', '.join(missing)}. "
-            "Accepted cargo values include Coal, Thermal Coal, Coking Coal, Iron Ore, Fertilizer, Manganese Ore."
+            "Accepted cargo values include Coal, Thermal Coal, "
+            "Coking Coal, Iron Ore, Fertilizer, Manganese Ore."
         )
 
-    # The prototype's freight dataset is specifically calibrated for the
-    # procurement direction: overseas origin -> East Coast India destination.
-    # Do not silently reverse the lane, because freight markets are directional.
-    if origin not in SUPPORTED_FREIGHT_ORIGINS or destination not in SUPPORTED_FREIGHT_DESTINATIONS:
+    # The prototype's freight dataset is specifically calibrated
+    # for overseas origin -> East Coast India destination.
+    #
+    # Do not silently reverse the lane because freight markets
+    # are directional.
+    if (
+        origin not in SUPPORTED_FREIGHT_ORIGINS
+        or destination not in SUPPORTED_FREIGHT_DESTINATIONS
+    ):
+
         raise ValueError(
-            "Unsupported freight lane. This prototype forecasts overseas → East Coast India routes only. "
-            "Use Beira, Gladstone, Hedland (Port Hedland), Maputo, or Nacala as origin and "
+            "Unsupported freight lane. "
+            "This prototype forecasts overseas → East Coast India "
+            "routes only. Use Beira, Gladstone, Hedland "
+            "(Port Hedland), Maputo, or Nacala as origin and "
             "Paradip or Visakhapatnam as destination."
         )
 
-    return origin, destination, cargo, vessel
+    return (
+        origin,
+        destination,
+        cargo,
+        vessel,
+    )
 
+
+# ============================================================
+# MODEL INITIALIZATION
+# ============================================================
 
 @lru_cache(maxsize=1)
-def initialize() -> tuple[pd.DataFrame, pd.DataFrame, Pipeline, pd.Timestamp]:
-    df = add_model_features(load_dataset())
+def initialize() -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    Pipeline,
+    pd.Timestamp,
+]:
+
+    df = add_model_features(
+        load_dataset()
+    )
+
     latest_date = df["date"].max()
 
-    # Final working-model behaviour: train using all rows before the latest
-    # available month, then predict the latest month.
-    train_df = df[df["date"] < latest_date].copy()
-    latest_df = df[df["date"] == latest_date].copy()
+    # Train using all rows before the latest
+    # available month.
+    train_df = df[
+        df["date"] < latest_date
+    ].copy()
 
-    # The ML model learns the market adjustment around the economic baseline.
+    # Predict the latest month.
+    latest_df = df[
+        df["date"] == latest_date
+    ].copy()
+
+    # ML target:
+    #
+    # estimated freight
+    # -
+    # economic baseline
+    #
+    # Therefore XGBoost learns the market adjustment
+    # around the economic foundation.
     train_target = (
-        train_df["estimated_route_freight_usd_t"]
-        - train_df["economic_baseline_usd_t"]
+        train_df[
+            "estimated_route_freight_usd_t"
+        ]
+        - train_df[
+            "economic_baseline_usd_t"
+        ]
     )
 
     model = build_model()
-    model.fit(train_df[MODEL_FEATURES], train_target)
 
-    latest_df["predicted_market_adjustment"] = model.predict(
+    model.fit(
+        train_df[MODEL_FEATURES],
+        train_target
+    )
+
+    latest_df[
+        "predicted_market_adjustment"
+    ] = model.predict(
         latest_df[MODEL_FEATURES]
     )
-    latest_df["current_freight_usd_t"] = (
-        latest_df["economic_baseline_usd_t"]
-        + latest_df["predicted_market_adjustment"]
+
+    latest_df[
+        "current_freight_usd_t"
+    ] = (
+        latest_df[
+            "economic_baseline_usd_t"
+        ]
+        + latest_df[
+            "predicted_market_adjustment"
+        ]
     )
 
-    return df, latest_df, model, latest_date
+    return (
+        df,
+        latest_df,
+        model,
+        latest_date,
+    )
 
 
-def decision_engine(current: float, month_1: float, month_2: float, row: pd.Series, cargo: str, vessel_type: str, origin: str, destination: str) -> dict:
-    """Transparent prototype decision layer. It does not optimize vessel capacity from cargo quantity."""
+# ============================================================
+# DECISION ENGINE
+# ============================================================
+
+def decision_engine(
+    current: float,
+    month_1: float,
+    month_2: float,
+    row: pd.Series,
+    cargo: str,
+    vessel_type: str,
+    origin: str,
+    destination: str,
+) -> dict:
+
+    """
+    Transparent prototype decision layer.
+
+    It does not optimize vessel capacity from
+    cargo quantity.
+    """
+
     d1 = month_1 - current
     d2 = month_2 - current
-    baseline = float(row.get("economic_baseline_usd_t", np.nan))
-    market_adjustment = current - baseline if np.isfinite(baseline) else np.nan
+
+    baseline = float(
+        row.get(
+            "economic_baseline_usd_t",
+            np.nan
+        )
+    )
+
+    market_adjustment = (
+        current - baseline
+        if np.isfinite(baseline)
+        else np.nan
+    )
+
+    # --------------------------------------------------------
+    # Market signal
+    # --------------------------------------------------------
 
     if d1 > 0.20:
+
         market_signal = "Firming"
+
     elif d1 < -0.20:
+
         market_signal = "Easing"
+
     else:
+
         market_signal = "Stable"
 
-    if d1 > 0.20 and d2 >= d1 * 0.25:
+    # --------------------------------------------------------
+    # Recommendation
+    # --------------------------------------------------------
+
+    if (
+        d1 > 0.20
+        and d2 >= d1 * 0.25
+    ):
+
         title = "Consider locking freight"
-        short = "Near-term freight pressure is upward."
-    elif d1 < -0.20 and d2 <= 0.05:
+
+        short = (
+            "Near-term freight pressure is upward."
+        )
+
+    elif (
+        d1 < -0.20
+        and d2 <= 0.05
+    ):
+
         title = "Waiting may be favourable"
-        short = "The near-term curve is easing."
+
+        short = (
+            "The near-term curve is easing."
+        )
+
     else:
+
         title = "Monitor before fixing"
-        short = "The near-term curve has no strong directional signal."
+
+        short = (
+            "The near-term curve has no strong "
+            "directional signal."
+        )
+
+    # --------------------------------------------------------
+    # Near-term move
+    # --------------------------------------------------------
 
     if d1 > 0.05:
+
         move = "Higher next month"
+
     elif d1 < -0.05:
+
         move = "Lower next month"
+
     else:
+
         move = "Broadly flat"
 
-    if np.isfinite(market_adjustment) and market_adjustment > 0:
+    # --------------------------------------------------------
+    # Economic signal
+    # --------------------------------------------------------
+
+    if (
+        np.isfinite(market_adjustment)
+        and market_adjustment > 0
+    ):
+
         economics = "Above voyage-cost floor"
+
     elif np.isfinite(market_adjustment):
+
         economics = "Near/below voyage-cost floor"
+
     else:
+
         economics = "Baseline unavailable"
 
+    # --------------------------------------------------------
+    # Explanation
+    # --------------------------------------------------------
+
     explanation = (
-        f"{market_signal} freight on {origin} → {destination}. "
-        f"The model estimates ${current:.2f}/t now versus ${month_1:.2f}/t next month. "
+        f"{market_signal} freight on "
+        f"{origin} → {destination}. "
+        f"The model estimates "
+        f"${current:.2f}/t now versus "
+        f"${month_1:.2f}/t next month. "
     )
+
     if title == "Consider locking freight":
-        explanation += "Locking earlier can reduce exposure to the projected upward move."
+
+        explanation += (
+            "Locking earlier can reduce exposure "
+            "to the projected upward move."
+        )
+
     elif title == "Waiting may be favourable":
-        explanation += "A short wait may offer a lower freight level if the market follows the projected curve."
+
+        explanation += (
+            "A short wait may offer a lower freight "
+            "level if the market follows the projected curve."
+        )
+
     else:
-        explanation += "With only a modest projected move, timing is less decisive and should be monitored."
+
+        explanation += (
+            "With only a modest projected move, "
+            "timing is less decisive and should be monitored."
+        )
 
     return {
         "title": title,
@@ -375,6 +761,10 @@ def decision_engine(current: float, month_1: float, month_2: float, row: pd.Seri
     }
 
 
+# ============================================================
+# FREIGHT PREDICTION
+# ============================================================
+
 def predict_freight(
     origin_port: str,
     destination_port: str,
@@ -382,129 +772,327 @@ def predict_freight(
     vessel_type: str,
     cargo_quantity_t: float | None = None,
 ) -> dict:
-    df, latest_predictions, _, latest_date = initialize()
 
-    origin_port = resolve_alias(PORT_ALIASES, origin_port) or origin_port
-    destination_port = resolve_alias(PORT_ALIASES, destination_port) or destination_port
-    cargo = resolve_alias(CARGO_ALIASES, cargo) or cargo
-    vessel_type = resolve_alias(VESSEL_ALIASES, vessel_type) or vessel_type
+    df, latest_predictions, _, latest_date = (
+        initialize()
+    )
 
+    # Normalize again for direct function calls.
+    origin_port = (
+        resolve_alias(
+            PORT_ALIASES,
+            origin_port
+        )
+        or origin_port
+    )
+
+    destination_port = (
+        resolve_alias(
+            PORT_ALIASES,
+            destination_port
+        )
+        or destination_port
+    )
+
+    cargo = (
+        resolve_alias(
+            CARGO_ALIASES,
+            cargo
+        )
+        or cargo
+    )
+
+    vessel_type = (
+        resolve_alias(
+            VESSEL_ALIASES,
+            vessel_type
+        )
+        or vessel_type
+    )
+
+    # Find the exact latest route/cargo/vessel row.
     row = latest_predictions[
         (latest_predictions["origin_port"] == origin_port)
-        & (latest_predictions["destination_port"] == destination_port)
-        & (latest_predictions["cargo"] == cargo)
-        & (latest_predictions["vessel_type"] == vessel_type)
+        & (
+            latest_predictions["destination_port"]
+            == destination_port
+        )
+        & (
+            latest_predictions["cargo"]
+            == cargo
+        )
+        & (
+            latest_predictions["vessel_type"]
+            == vessel_type
+        )
     ]
 
     if row.empty:
-        raise ValueError("No matching route/cargo/vessel combination in the dataset.")
+
+        raise ValueError(
+            "No matching route/cargo/vessel "
+            "combination in the dataset."
+        )
 
     row = row.iloc[0]
-    current = float(row["current_freight_usd_t"])
 
-    change_1, source_1 = calculate_seasonal_change(
-        df, origin_port, destination_port, cargo, vessel_type, latest_date, 1
-    )
-    change_2, source_2 = calculate_seasonal_change(
-        df, origin_port, destination_port, cargo, vessel_type, latest_date, 2
+    current = float(
+        row["current_freight_usd_t"]
     )
 
-    # Both future projections start from the current forecast; +2 is not recursive.
-    month_1 = current + SEASONAL_WEIGHT * change_1
-    month_2 = current + SEASONAL_WEIGHT * change_2
+    # Historical seasonal movement.
+    change_1, source_1 = (
+        calculate_seasonal_change(
+            df,
+            origin_port,
+            destination_port,
+            cargo,
+            vessel_type,
+            latest_date,
+            1,
+        )
+    )
 
+    change_2, source_2 = (
+        calculate_seasonal_change(
+            df,
+            origin_port,
+            destination_port,
+            cargo,
+            vessel_type,
+            latest_date,
+            2,
+        )
+    )
+
+    # Both future projections start from the current forecast.
+    #
+    # +2 is NOT recursive.
+    month_1 = (
+        current
+        + SEASONAL_WEIGHT * change_1
+    )
+
+    month_2 = (
+        current
+        + SEASONAL_WEIGHT * change_2
+    )
+
+    # Decision engine.
     decision = decision_engine(
-        current, month_1, month_2, row, cargo, vessel_type, origin_port, destination_port
+        current,
+        month_1,
+        month_2,
+        row,
+        cargo,
+        vessel_type,
+        origin_port,
+        destination_port,
     )
+
+    # --------------------------------------------------------
+    # Base result
+    # --------------------------------------------------------
 
     result = {
-        "forecast_month": latest_date.strftime("%B %Y"),
-        "origin_port": origin_port,
-        "destination_port": destination_port,
-        "cargo": cargo,
-        "vessel_type": vessel_type,
-        "current_freight_usd_t": round(current, 2),
-        "forecast_plus_1_usd_t": round(month_1, 2),
-        "forecast_plus_2_usd_t": round(month_2, 2),
-        "seasonal_weight": SEASONAL_WEIGHT,
-        "seasonal_source_plus_1": source_1,
-        "seasonal_source_plus_2": source_2,
-        "economic_baseline_usd_t": round(float(row["economic_baseline_usd_t"]), 2),
-        "voyage_days_proxy": round(float(row["voyage_days_proxy"]), 2),
-        "fuel_cost_usd_t_proxy": round(float(row["fuel_cost_usd_t_proxy"]), 2),
-        "vessel_opex_usd_t_proxy": round(float(row["vessel_opex_usd_t_proxy"]), 2),
-        "decision": decision,
+        "forecast_month":
+            latest_date.strftime("%B %Y"),
+
+        "origin_port":
+            origin_port,
+
+        "destination_port":
+            destination_port,
+
+        "cargo":
+            cargo,
+
+        "vessel_type":
+            vessel_type,
+
+        "current_freight_usd_t":
+            round(current, 2),
+
+        "forecast_plus_1_usd_t":
+            round(month_1, 2),
+
+        "forecast_plus_2_usd_t":
+            round(month_2, 2),
+
+        "seasonal_weight":
+            SEASONAL_WEIGHT,
+
+        "seasonal_source_plus_1":
+            source_1,
+
+        "seasonal_source_plus_2":
+            source_2,
+
+        "economic_baseline_usd_t":
+            round(
+                float(
+                    row[
+                        "economic_baseline_usd_t"
+                    ]
+                ),
+                2,
+            ),
+
+        "voyage_days_proxy":
+            round(
+                float(
+                    row[
+                        "voyage_days_proxy"
+                    ]
+                ),
+                2,
+            ),
+
+        "fuel_cost_usd_t_proxy":
+            round(
+                float(
+                    row[
+                        "fuel_cost_usd_t_proxy"
+                    ]
+                ),
+                2,
+            ),
+
+        "vessel_opex_usd_t_proxy":
+            round(
+                float(
+                    row[
+                        "vessel_opex_usd_t_proxy"
+                    ]
+                ),
+                2,
+            ),
+
+        "decision":
+            decision,
     }
 
+    # --------------------------------------------------------
+    # Cargo quantity
+    # --------------------------------------------------------
+
     if cargo_quantity_t is not None:
-        quantity = float(cargo_quantity_t)
+
+        quantity = float(
+            cargo_quantity_t
+        )
+
         if quantity <= 0:
-            raise ValueError("cargo_quantity_t must be greater than zero.")
-        result["cargo_quantity_t"] = quantity
-        result["current_total_freight_usd"] = round(current * quantity, 2)
-        result["plus_1_total_freight_usd"] = round(month_1 * quantity, 2)
-        result["plus_2_total_freight_usd"] = round(month_2 * quantity, 2)
+
+            raise ValueError(
+                "cargo_quantity_t must be "
+                "greater than zero."
+            )
+
+        result[
+            "cargo_quantity_t"
+        ] = quantity
+
+        result[
+            "current_total_freight_usd"
+        ] = round(
+            current * quantity,
+            2,
+        )
+
+        result[
+            "plus_1_total_freight_usd"
+        ] = round(
+            month_1 * quantity,
+            2,
+        )
+
+        result[
+            "plus_2_total_freight_usd"
+        ] = round(
+            month_2 * quantity,
+            2,
+        )
 
     return result
 
 
-PROJECT_DIR = os.path.dirname(BASE_DIR)
-
-app = Flask(
-    __name__,
-    static_folder=PROJECT_DIR,
-    static_url_path=""
-)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
-
-
-# The production deployment serves the existing Vite-style frontend directly
-# from Flask so the website and ML API share one public origin on Render.
-FRONTEND_DIR = os.path.dirname(BASE_DIR)
-
+# ============================================================
+# FRONTEND ROUTES
+# ============================================================
 
 @app.get("/")
 def root():
-    return send_from_directory(FRONTEND_DIR, "index.html")
+    """
+    Serve the Meridian frontend.
+    """
+
+    return app.send_static_file(
+        "index.html"
+    )
 
 
-@app.get("/app.js")
-def frontend_app():
-    return send_from_directory(FRONTEND_DIR, "app.js")
+# ============================================================
+# API HEALTH CHECK
+# ============================================================
 
-
-@app.get("/style.css")
-def frontend_style():
-    return send_from_directory(FRONTEND_DIR, "style.css")
-
-
-@app.get("/geography.css")
-def frontend_geography_style():
-    return send_from_directory(FRONTEND_DIR, "geography.css")
-
-
-@app.get("/maritime-routes.json")
-def frontend_routes():
-    return send_from_directory(os.path.join(FRONTEND_DIR, "public"), "maritime-routes.json")
-
-
-@app.get("/models/<path:filename>")
-def frontend_model(filename):
-    return send_from_directory(os.path.join(FRONTEND_DIR, "public", "models"), filename)
-
-
-@app.get("/api/freight-prediction/health")
+@app.get(
+    "/api/freight-prediction/health"
+)
 def health():
-    _, _, _, latest_date = initialize()
-    return jsonify({"status": "ok", "latest_data_month": latest_date.strftime("%Y-%m")})
 
-
-@app.post("/api/freight-prediction")
-def freight_prediction():
     try:
-        data = request.get_json(silent=True) or {}
-        origin, destination, cargo, vessel = normalize_inputs(data)
-        quantity = data.get("cargo_quantity_t")
+
+        _, _, _, latest_date = (
+            initialize()
+        )
+
+        return jsonify({
+            "status": "ok",
+            "latest_data_month":
+                latest_date.strftime("%Y-%m"),
+        })
+
+    except Exception as exc:
+
+        app.logger.exception(
+            "Health check failed"
+        )
+
+        return jsonify({
+            "status": "error",
+            "error": str(exc),
+        }), 500
+
+
+# ============================================================
+# API: FREIGHT PREDICTION
+# ============================================================
+
+@app.post(
+    "/api/freight-prediction"
+)
+def freight_prediction():
+
+    data = {}
+
+    try:
+
+        data = (
+            request.get_json(
+                silent=True
+            )
+            or {}
+        )
+
+        origin, destination, cargo, vessel = (
+            normalize_inputs(data)
+        )
+
+        quantity = data.get(
+            "cargo_quantity_t"
+        )
+
         result = predict_freight(
             origin,
             destination,
@@ -512,18 +1100,62 @@ def freight_prediction():
             vessel,
             quantity,
         )
-        return jsonify(result)
-    except ValueError as exc:
-        app.logger.warning("Freight prediction validation error. Payload=%r Error=%s", data, exc)
-        return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        app.logger.exception("Freight prediction failed")
-        return jsonify({"error": "Freight prediction failed", "details": str(exc)}), 500
 
+        return jsonify(result)
+
+    except ValueError as exc:
+
+        app.logger.warning(
+            "Freight prediction validation error. "
+            "Payload=%r Error=%s",
+            data,
+            exc,
+        )
+
+        return jsonify({
+            "error": str(exc)
+        }), 400
+
+    except Exception as exc:
+
+        app.logger.exception(
+            "Freight prediction failed"
+        )
+
+        return jsonify({
+            "error":
+                "Freight prediction failed",
+
+            "details":
+                str(exc),
+        }), 500
+
+
+# ============================================================
+# LOCAL DEVELOPMENT
+# ============================================================
 
 if __name__ == "__main__":
-    # Startup training happens once and is cached for subsequent requests.
+
+    # Startup training happens once and is cached
+    # for subsequent requests.
     initialize()
-    print("Freight prediction service ready.")
-    print("Latest data month: March 2026")
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5002")), debug=False)
+
+    print(
+        "Freight prediction service ready."
+    )
+
+    print(
+        "Latest data month: March 2026"
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "5002"
+            )
+        ),
+        debug=False,
+    )
