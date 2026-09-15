@@ -448,7 +448,13 @@ def predict_freight(
     return result
 
 
-app = Flask(__name__)
+PROJECT_DIR = os.path.dirname(BASE_DIR)
+
+app = Flask(
+    __name__,
+    static_folder=PROJECT_DIR,
+    static_url_path=""
+)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
